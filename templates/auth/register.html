@@ -1,0 +1,83 @@
+{% extends 'blog/base.html' %}
+
+{% block content %}
+<div class="min-h-[70vh] flex items-center justify-center">
+    <div class="glass-panel p-8 rounded-2xl w-full max-w-md border-t-4 border-brand-purple">
+        <h2 class="text-3xl font-bold mb-2">New Identity</h2>
+        <p class="text-gray-400 text-sm mb-6">Create a Zero-Knowledge profile.</p>
+
+        <form id="registerForm" class="space-y-4">
+            <div>
+                <label class="block text-xs font-mono text-brand-purple mb-1">USERNAME</label>
+                <input type="text" id="username" class="glass-input w-full p-3 rounded" required>
+            </div>
+            <div>
+                <label class="block text-xs font-mono text-brand-purple mb-1">PASSPHRASE</label>
+                <input type="password" id="password" class="glass-input w-full p-3 rounded" required>
+                <p class="text-[10px] text-gray-500 mt-1">Note: We only store your public key (G^x).</p>
+            </div>
+            
+            <button type="submit" class="w-full bg-brand-purple text-white font-bold py-3 rounded hover:bg-white hover:text-black transition-all mt-4">
+                REGISTER IDENTITY
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Logic identical to previous version, just styled -->
+<script>
+    const P = BigInt("{{ prime_p }}");
+    const G = BigInt("{{ generator_g }}");
+
+    async function hashPassword(password) {
+        const msgBuffer = new TextEncoder().encode(password);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        let hex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return BigInt("0x" + hex);
+    }
+
+    function modPow(base, exp, mod) {
+        let result = 1n;
+        base = base % mod;
+        while (exp > 0n) {
+            if (exp % 2n === 1n) result = (result * base) % mod;
+            exp = exp / 2n;
+            base = (base * base) % mod;
+        }
+        return result;
+    }
+
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        
+        const btn = e.target.querySelector('button');
+        btn.innerHTML = "CALCULATING KEYS...";
+        btn.classList.add('opacity-50');
+
+        const hashInt = await hashPassword(password);
+        const x = hashInt % (P - 1n);
+        const y = modPow(G, x, P);
+
+        const response = await fetch('/auth/register/', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+            body: JSON.stringify({
+                username: username,
+                public_key: y.toString()
+            })
+        });
+
+        const data = await response.json();
+        if(data.status === 'success') {
+            window.location.href = data.redirect;
+        } else {
+            alert(data.message);
+            btn.innerHTML = "TRY AGAIN";
+            btn.classList.remove('opacity-50');
+        }
+    });
+</script>
+{% endblock %}

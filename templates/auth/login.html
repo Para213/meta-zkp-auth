@@ -1,0 +1,251 @@
+{% extends 'blog/base.html' %}
+
+{% block content %}
+<div class="min-h-[80vh] flex items-center justify-center">
+    
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 w-full max-w-6xl">
+        
+        <!-- LEFT: Control Panel -->
+        <div class="glass-panel p-8 rounded-2xl relative overflow-hidden group">
+            <div class="absolute top-0 left-0 w-1 h-full bg-brand-accent"></div>
+            
+            <h2 class="text-3xl font-bold mb-2">Identify</h2>
+            <p class="text-gray-400 text-sm mb-8 font-mono">Protocol: SCHNORR INTERACTIVE ZKP</p>
+
+            <form id="loginForm" class="space-y-6">
+                <div>
+                    <label class="block text-xs font-mono text-brand-accent mb-2">USERNAME_ID</label>
+                    <input type="text" id="username" class="glass-input w-full p-4 rounded-lg" value="alex" required>
+                </div>
+                <div>
+                    <label class="block text-xs font-mono text-brand-accent mb-2">SECRET_PASSPHRASE</label>
+                    <input type="password" id="password" class="glass-input w-full p-4 rounded-lg" value="secret123" required>
+                </div>
+
+                <div id="controls-area" class="pt-4">
+                    <button type="submit" id="btn-start" class="w-full bg-brand-accent/10 border border-brand-accent text-brand-accent hover:bg-brand-accent hover:text-black font-bold py-4 rounded-lg transition-all duration-300 uppercase tracking-widest text-sm">
+                        Initialize Handshake
+                    </button>
+                    
+                    <button type="button" id="btn-next" onclick="nextStep()" style="display: none;" class="w-full bg-brand-success/20 border border-brand-success text-brand-success hover:bg-brand-success hover:text-black font-bold py-4 rounded-lg transition-all duration-300 flex items-center justify-center gap-3">
+                        <span>EXECUTE STEP</span>
+                        <svg class="w-5 h-5 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- RIGHT: Visualization Terminal -->
+        <div class="glass-panel rounded-2xl p-1 flex flex-col h-[600px] relative shadow-2xl border-brand-accent/30">
+            <!-- Header -->
+            <div class="bg-black/50 p-3 rounded-t-xl flex justify-between items-center border-b border-white/10">
+                <div class="flex gap-2">
+                    <div class="w-3 h-3 rounded-full bg-brand-danger"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-brand-success"></div>
+                </div>
+                <div class="font-mono text-xs text-gray-500">root@meta-secure:~# zkp_daemon</div>
+                <div id="step-badge" class="font-mono text-xs text-brand-accent border border-brand-accent px-2 py-0.5 rounded">IDLE</div>
+            </div>
+
+            <!-- Terminal Output -->
+            <div id="zkp-log" class="flex-grow bg-black/80 p-6 font-mono text-sm overflow-y-auto space-y-2 rounded-b-xl shadow-inner custom-scroll">
+                <div class="text-gray-500">Waiting for initialization vector...</div>
+            </div>
+
+            <!-- Visual Overlay (Scanline) -->
+            <div class="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] z-10 bg-[length:100%_2px,3px_100%] opacity-20"></div>
+        </div>
+    </div>
+</div>
+
+<!-- JS LOGIC (Identical Logic, Better Visuals) -->
+<script>
+    // State
+    let currentStep = 0;
+    let usernameVal = "", passwordVal = "";
+    let x = 0n, r = 0n, t = 0n, c = 0n, s = 0n;
+    let redirectUrl = "";
+    
+    // Constants
+    const P = BigInt("{{ prime_p }}");
+    const G = BigInt("{{ generator_g }}");
+
+    // Elements
+    const logDiv = document.getElementById('zkp-log');
+    const btnNext = document.getElementById('btn-next');
+    const stepBadge = document.getElementById('step-badge');
+    const inputUser = document.getElementById('username');
+    const inputPass = document.getElementById('password');
+    const btnStart = document.getElementById('btn-start');
+
+    // ANIMATED LOGGER
+    function log(msg, type='info') {
+        const row = document.createElement('div');
+        row.className = "opacity-0 transform translate-x-[-10px]"; // Start state for animation
+
+        let content = "";
+        if (type === 'title') {
+            row.className += " mt-4 pt-4 border-t border-dashed border-gray-700 text-brand-accent font-bold";
+            content = `> [PHASE ${currentStep}] ${msg}`;
+        } else if (type === 'secret') {
+            content = `<span class="text-brand-purple">🔒 SECRET:</span> ${msg}`;
+        } else if (type === 'public') {
+            content = `<span class="text-blue-400">🌐 PUBLIC:</span> ${msg}`;
+        } else if (type === 'math') {
+            content = `<span class="text-gray-500">∑ MATH:</span> ${msg}`;
+        } else if (type === 'server') {
+            content = `<span class="text-brand-success">✔ SERVER:</span> ${msg}`;
+        } else if (type === 'error') {
+            row.className += " text-brand-danger font-bold";
+            content = `❌ FATAL: ${msg}`;
+        }
+
+        row.innerHTML = content;
+        logDiv.appendChild(row);
+        
+        // GSAP Animation for new line
+        gsap.to(row, { opacity: 1, x: 0, duration: 0.3 });
+        
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    // MATH UTILS
+    async function hashPassword(pwd) {
+        const msgBuffer = new TextEncoder().encode(pwd);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        let hex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return BigInt("0x" + hex);
+    }
+
+    function modPow(base, exp, mod) {
+        let res = 1n;
+        base = base % mod;
+        while (exp > 0n) {
+            if (exp % 2n === 1n) res = (res * base) % mod;
+            exp = exp / 2n;
+            base = (base * base) % mod;
+        }
+        return res;
+    }
+
+    // CONTROLLER
+    document.getElementById('loginForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        usernameVal = inputUser.value;
+        passwordVal = inputPass.value;
+
+        // UI Transition
+        inputUser.disabled = true;
+        inputPass.disabled = true;
+        gsap.to(inputUser, { opacity: 0.5 });
+        gsap.to(inputPass, { opacity: 0.5 });
+        
+        btnStart.style.display = 'none';
+        btnNext.style.display = 'flex';
+        
+        logDiv.innerHTML = '';
+        log("Protocol Initiated.", 'title');
+        log(`P = ${P}`, 'math');
+        
+        currentStep = 1;
+        updateBadge("GENERATING");
+        btnNext.querySelector('span').innerText = "CALCULATE SECRETS";
+    });
+
+    async function nextStep() {
+        // Disable button briefly for effect
+        btnNext.disabled = true;
+        gsap.to(btnNext, { opacity: 0.7, scale: 0.98, duration: 0.1, yoyo: true, repeat: 1 });
+
+        try {
+            switch(currentStep) {
+                case 1: // Secrets
+                    log("Deriving Keys from Entropy", 'title');
+                    const hashInt = await hashPassword(passwordVal);
+                    x = hashInt % (P - 1n);
+                    r = BigInt(Math.floor(Math.random() * 1000000));
+                    t = modPow(G, r, P);
+                    
+                    log(`Private Key (x) generated`, 'secret');
+                    log(`Random Nonce (r) generated`, 'secret');
+                    log(`Commitment (t) calculated`, 'math');
+                    
+                    prepareNextButton(2, "TRANSMIT COMMITMENT", "CONNECTING");
+                    break;
+
+                case 2: // Network
+                    log("Handshaking with Server", 'title');
+                    log(`Sending User:${usernameVal}, t:${t}`, 'public');
+
+                    const res1 = await fetch('/auth/challenge/', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+                        body: JSON.stringify({ username: usernameVal, commitment_t: t.toString() })
+                    });
+                    const data1 = await res1.json();
+                    if(data1.status !== 'challenge_issued') throw new Error(data1.message);
+
+                    c = BigInt(data1.challenge_c);
+                    log(`Challenge (c) received: ${c}`, 'server');
+                    prepareNextButton(3, "SOLVE CHALLENGE", "COMPUTING");
+                    break;
+
+                case 3: // Solve
+                    log("Zero-Knowledge Proof Calculation", 'title');
+                    s = (r + c * x) % (P - 1n);
+                    log(`Proof Response (s) = ${s}`, 'math');
+                    log(`(r + c * x) % (P-1)`, 'math');
+                    prepareNextButton(4, "VERIFY & AUTHENTICATE", "VERIFYING");
+                    break;
+
+                case 4: // Verify
+                    log("Final Verification", 'title');
+                    const res2 = await fetch('/auth/verify/', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+                        body: JSON.stringify({ response_s: s.toString() })
+                    });
+                    const data2 = await res2.json();
+                    
+                    if(data2.status === 'success') {
+                        const dbg = data2.debug;
+                        redirectUrl = data2.redirect;
+                        log(`Server checked: G^s == t * y^c`, 'server');
+                        log(`LHS: ${dbg.lhs} | RHS: ${dbg.rhs}`, 'server');
+                        
+                        if(dbg.lhs == dbg.rhs) {
+                            log("ACCESS GRANTED", 'server');
+                            updateBadge("AUTHORIZED");
+                            btnNext.querySelector('span').innerText = "ENTER SYSTEM >>";
+                            btnNext.classList.remove('border-brand-success', 'text-brand-success');
+                            btnNext.classList.add('bg-brand-accent', 'text-black', 'border-transparent');
+                            currentStep = 5;
+                        } else throw new Error("Math Mismatch");
+                    } else throw new Error("Server Rejected");
+                    break;
+
+                case 5:
+                    window.location.href = redirectUrl;
+                    break;
+            }
+        } catch (err) {
+            log(err.message, 'error');
+            updateBadge("FAILURE");
+        }
+        btnNext.disabled = false;
+    }
+
+    function prepareNextButton(step, text, badge) {
+        currentStep = step;
+        btnNext.querySelector('span').innerText = text;
+        updateBadge(badge);
+    }
+
+    function updateBadge(text) {
+        stepBadge.innerText = text;
+        gsap.from(stepBadge, { scale: 1.5, color: "#fff", duration: 0.5 });
+    }
+</script>
+{% endblock %}

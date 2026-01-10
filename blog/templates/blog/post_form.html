@@ -1,0 +1,115 @@
+{% extends 'blog/base.html' %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="glass-panel p-8 rounded-2xl">
+        <h2 class="text-2xl font-bold mb-6 flex items-center gap-3">
+            <span class="text-brand-success">►</span> 
+            {% if form.instance.pk %}EDIT_ENTRY{% else %}NEW_ENTRY{% endif %}
+        </h2>
+
+        <form method="post" class="space-y-6">
+            {% csrf_token %}
+            
+            <div>
+                <label class="block text-xs font-mono text-gray-400 mb-2">TITLE</label>
+                {{ form.title.errors }}
+                <input type="text" name="title" value="{{ form.title.value|default:'' }}" class="glass-input w-full p-3 rounded" required>
+            </div>
+
+            <div>
+                <label class="block text-xs font-mono text-gray-400 mb-2">TEXT_CONTENT</label>
+                {{ form.content.errors }}
+                <textarea name="content" class="glass-input w-full p-3 rounded h-32" required>{{ form.content.value|default:'' }}</textarea>
+            </div>
+
+            <!-- Drawing Tool -->
+            <div class="bg-black/30 p-4 rounded-xl border border-white/10">
+                <div class="flex justify-between items-center mb-2">
+                    <label class="text-xs font-mono text-brand-accent">VISUAL_INPUT</label>
+                    <button type="button" onclick="clearCanvas()" class="text-[10px] bg-brand-danger/20 text-brand-danger px-2 py-1 rounded hover:bg-brand-danger hover:text-white transition-colors">RESET_CANVAS</button>
+                </div>
+                
+                <canvas id="drawingCanvas" class="w-full bg-white rounded cursor-crosshair touch-none" height="300"></canvas>
+            </div>
+
+            {{ form.drawing_data }}
+
+            <button type="submit" onclick="saveDrawing()" class="w-full bg-brand-success text-black font-bold py-4 rounded hover:bg-white transition-all duration-300 mt-8">
+                COMMIT_TO_DB
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+    // Canvas Logic (Updated for Responsive Width)
+    const canvas = document.getElementById('drawingCanvas');
+    const container = canvas.parentElement;
+    
+    // Fit canvas to container width
+    canvas.width = container.offsetWidth - 32; // minus padding
+    
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+
+    // Load existing
+    const existingData = document.querySelector('input[name="drawing_data"]').value;
+    if (existingData) {
+        const img = new Image();
+        img.onload = function() { ctx.drawImage(img, 0, 0); };
+        img.src = existingData;
+    }
+
+    // Mouse Events
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mouseup', endDraw);
+    canvas.addEventListener('mousemove', draw);
+    
+    // Touch Events
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        startDraw(e.touches[0]);
+    });
+    canvas.addEventListener('touchend', endDraw);
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        draw(e.touches[0]);
+    });
+
+    function startDraw(e) {
+        drawing = true;
+        draw(e); // Draw single dot
+    }
+    
+    function endDraw() {
+        drawing = false;
+        ctx.beginPath();
+    }
+
+    function draw(e) {
+        if (!drawing) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#000'; // Drawing in black on white
+
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    }
+
+    function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function saveDrawing() {
+        document.querySelector('input[name="drawing_data"]').value = canvas.toDataURL();
+    }
+</script>
+{% endblock %}
