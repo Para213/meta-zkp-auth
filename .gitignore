@@ -3,17 +3,25 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Virtual environment
+venv/
+../venv/
+
 # Django
 *.log
-local_settings.py
 db.sqlite3
 db.sqlite3-journal
+media/
 
-# Virtual Environment (Very Important)
-venv/
-env/
+# Static files (if collected)
+staticfiles/
+
+# Environment variables
 .env
 
-# IDE settings
+# VS Code
 .vscode/
-.idea/
+
+# OS
+.DS_Store
+Thumbs.db
