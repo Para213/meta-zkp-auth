@@ -19,6 +19,9 @@ staticfiles/
 # Environment variables
 .env
 
+# Claude Code
+.claude/
+
 # VS Code
 .vscode/
 
